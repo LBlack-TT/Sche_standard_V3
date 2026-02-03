@@ -3,12 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>企业物料反查 & BOM比对系统 (V3.1 修正版)</title>
+    <title>企业物料反查 & BOM比对系统 (V3.3 智能比对版)</title>
     <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/localforage/1.10.0/localforage.min.js"></script>
     
     <style>
-        body { font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 1100px; margin: 0 auto; padding: 20px; background-color: #f5f7fa; color: #333; }
+        body { font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 1200px; margin: 0 auto; padding: 20px; background-color: #f5f7fa; color: #333; }
         .container { background: white; padding: 0; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); overflow: hidden; min-height: 80vh;}
         
         /* 顶部导航 Tab */
@@ -46,13 +46,12 @@
         .input-group { display: flex; gap: 15px; margin-bottom: 15px; }
         .input-field { flex: 1; }
         
-        /* ★★★ 修正点：输入框样式还原 ★★★ */
         input[type="text"] { 
             width: 100%; 
-            padding: 10px; /* 改回 10px */
+            padding: 10px; 
             border: 1px solid #ddd; 
             border-radius: 4px; 
-            box-sizing: border-box; /* 加回此属性，确保大小计算正确 */
+            box-sizing: border-box; 
         }
         
         button { border: none; padding: 12px 25px; border-radius: 4px; cursor: pointer; font-size: 15px; transition: 0.3s; }
@@ -82,6 +81,11 @@
         .diff-text { color: #e74c3c; text-decoration: line-through; margin-right: 5px; font-size: 0.9em; }
         .correct-text { color: #27ae60; font-weight: bold; }
 
+        /* ★★★ 新增：比对模式选择样式 ★★★ */
+        .mode-selector { display: flex; gap: 20px; margin-bottom: 15px; padding: 10px; background: #f9f9f9; border-radius: 6px; border: 1px solid #eee; }
+        .radio-label { display: flex; align-items: center; cursor: pointer; font-weight: normal; margin: 0; }
+        .radio-label input { margin-right: 8px; transform: scale(1.2); }
+
         /* 提示框 */
         #toast { visibility: hidden; min-width: 200px; background-color: #333; color: #fff; text-align: center; border-radius: 4px; padding: 12px; position: fixed; z-index: 1000; left: 50%; bottom: 40px; transform: translateX(-50%); opacity: 0; transition: 0.3s; }
         #toast.show { visibility: visible; opacity: 1; bottom: 60px; }
@@ -99,7 +103,8 @@
         <h1>系统库管理 <span id="dbIndicator" class="db-status">连接中...</span></h1>
         
         <div class="section">
-            <label>1. 上传 Excel/CSV 系统表 (支持多选/追加)</label> <div class="upload-box" onclick="document.getElementById('sysFileInput').click()">
+            <label>1. 上传 Excel/CSV 系统表 (支持多选/追加)</label>
+            <div class="upload-box" onclick="document.getElementById('sysFileInput').click()">
                 <div style="font-size:24px">📂</div>
                 <span>点击上传系统代码表</span>
                 <input type="file" id="sysFileInput" multiple accept=".xls,.xlsx,.csv" onchange="handleSysFiles(this.files)">
@@ -130,11 +135,23 @@
     <div id="tab-bom" class="tab-content">
         <h1>BOM 比对验证</h1>
         <div class="section">
-            <label>第一步：确保【系统物料反查】页已有数据</label>
+            <label>第一步：选择比对依据</label>
+            <div class="mode-selector">
+                <label class="radio-label">
+                    <input type="radio" name="matchMode" value="pn" checked> 按品号匹配 (默认)
+                    <span style="font-size:12px; color:#888; margin-left:5px;">- 验证规格是否正确</span>
+                </label>
+                <label class="radio-label">
+                    <input type="radio" name="matchMode" value="spec"> 按规格匹配
+                    <span style="font-size:12px; color:#888; margin-left:5px;">- 反查品号是否正确</span>
+                </label>
+            </div>
+
+            <label>第二步：上传 BOM 表</label>
             <div class="upload-box" style="border-color: #27ae60; background: #f0fff4;" onclick="document.getElementById('bomFileInput').click()">
                 <div style="font-size:24px">📑</div>
-                <span>上传 BOM 表 (Excel/CSV)</span>
-                <div style="font-size:12px; color:#666; margin-top:5px">必须包含列头：品号、品名、规格型号</div>
+                <span>点击上传 BOM 表 (Excel/CSV)</span>
+                <div style="font-size:12px; color:#666; margin-top:5px">必须包含列头：Designator、品号、品名、规格型号</div>
                 <input type="file" id="bomFileInput" accept=".xls,.xlsx,.csv" onchange="handleBOMFile(this.files[0])">
             </div>
         </div>
@@ -166,7 +183,7 @@
     }
 
     // ==========================================
-    // 模块 1: 系统库管理 (LocalForage + SheetJS)
+    // 模块 1: 系统库管理
     // ==========================================
     async function loadCache() {
         try {
@@ -190,7 +207,6 @@
         const promises = Array.from(files).map(readSysFile);
         try {
             await Promise.all(promises);
-            // 去重与保存
             const map = new Map();
             globalDB.forEach(i => map.set(i.pn, i));
             globalDB = Array.from(map.values());
@@ -205,7 +221,6 @@
         }
     }
 
-    // 系统文件读取逻辑 (方块扫描)
     function readSysFile(file) {
         return new Promise((resolve) => {
             const reader = new FileReader();
@@ -218,7 +233,6 @@
                     globalDB.push(...items);
                     count += items.length;
                 });
-                // 更新文件列表
                 loadedFiles = loadedFiles.filter(f => f.name !== file.name);
                 loadedFiles.push({ name: file.name, count: count });
                 resolve();
@@ -233,18 +247,15 @@
             row.forEach((cell, idx) => {
                 if(!cell) return;
                 let val = String(cell).replace(/\s/g,"");
-                // 找品号
                 if(val.includes("品号") && (val.includes(":")||val.includes("："))) {
                     if(idx+1 < row.length) {
                         let pn = String(row[idx+1]).trim();
                         if(pn && !pn.includes("~")) { currPN = pn; currName = ""; }
                     }
                 }
-                // 找品名
                 if(currPN && val.includes("品名") && (val.includes(":")||val.includes("："))) {
                     if(idx+1 < row.length) currName = String(row[idx+1]).trim();
                 }
-                // 找规格
                 if(currPN && val.includes("规格") && (val.includes(":")||val.includes("："))) {
                     if(idx+1 < row.length) {
                         res.push({ file:fileName, pn:currPN, name:currName, spec:String(row[idx+1]).trim() });
@@ -256,7 +267,7 @@
     }
 
     // ==========================================
-    // 模块 2: BOM 比对 (新逻辑)
+    // 模块 2: BOM 比对 (智能双模式)
     // ==========================================
     function handleBOMFile(file) {
         if (!file) return;
@@ -270,13 +281,10 @@
             try {
                 const wb = XLSX.read(e.target.result, {type:'array'});
                 const ws = wb.Sheets[wb.SheetNames[0]];
-                // 使用标准JSON模式读取 (自动识别第一行表头)
                 const bomData = XLSX.utils.sheet_to_json(ws); 
-                
                 renderBOMReport(bomData);
             } catch (err) {
                 alert("BOM 解析失败，请确认文件格式正确");
-                console.error(err);
             }
         };
         reader.readAsArrayBuffer(file);
@@ -289,15 +297,24 @@
             return;
         }
 
-        let html = `<h3>比对结果 (${bomData.length} 行)</h3>`;
+        // ★★★ 获取当前选择的匹配模式 ★★★
+        const matchMode = document.querySelector('input[name="matchMode"]:checked').value; // 'pn' or 'spec'
+        const isModeSpec = (matchMode === 'spec');
+
+        let html = `<h3>比对结果 (${bomData.length} 行) - 当前模式: ${isModeSpec ? '按规格匹配' : '按品号匹配'}</h3>`;
+        
+        // 动态表头
+        let col3Title = isModeSpec ? "品号比对 (上:BOM / 下:系统)" : "规格比对 (上:BOM / 下:系统)";
+
         html += `<table>
             <thead>
                 <tr>
+                    <th style="width:15%">位号 (Designator)</th>
                     <th style="width:15%">BOM 品号</th>
-                    <th style="width:10%">状态</th>
-                    <th style="width:30%">规格比对 (上:BOM / 下:系统)</th>
-                    <th style="width:25%">品名比对</th>
-                    <th style="width:20%">操作</th>
+                    <th style="width:8%">状态</th>
+                    <th style="width:27%">${col3Title}</th>
+                    <th style="width:20%">品名/规格信息</th>
+                    <th style="width:15%">操作</th>
                 </tr>
             </thead>
             <tbody>`;
@@ -305,69 +322,103 @@
         let okCount=0, warnCount=0, errCount=0;
 
         bomData.forEach(row => {
-            // 获取 BOM 里的关键字段 (容错处理)
             const bomPN = String(row['品号'] || row['Part Number'] || "").trim();
             const bomSpec = String(row['规格型号'] || row['规格'] || row['Specification'] || "").trim();
             const bomName = String(row['品名'] || row['Description'] || "").trim();
+            const bomDesig = String(row['Designator'] || row['RefDes'] || "").trim();
 
-            if (!bomPN) return; // 跳过空行
+            if (!bomPN && !bomSpec) return; // 跳过空行
 
-            // 在系统库中查找
-            const sysItem = globalDB.find(i => i.pn === bomPN);
+            // ★★★ 核心匹配逻辑 ★★★
+            let sysItem = null;
+            
+            if (isModeSpec) {
+                // 按规格找 (去除空格后比对)
+                const cleanBomSpec = bomSpec.replace(/\s/g, "");
+                if (cleanBomSpec) {
+                    sysItem = globalDB.find(i => i.spec.replace(/\s/g, "") === cleanBomSpec);
+                }
+            } else {
+                // 按品号找 (默认)
+                if (bomPN) {
+                    sysItem = globalDB.find(i => i.pn === bomPN);
+                }
+            }
 
-            let statusHtml = "";
-            let specHtml = bomSpec;
-            let nameHtml = bomName;
+            let statusHtml = "", diffHtml = "", infoHtml = bomName;
             
             if (!sysItem) {
-                // 情况1：未找到
                 statusHtml = `<span class="status-badge status-err">未找到</span>`;
-                specHtml = `<span style="color:#999">${bomSpec}</span>`;
+                diffHtml = `<span style="color:#999">系统库无此${isModeSpec ? '规格' : '品号'}</span>`;
+                infoHtml += `<br><span style="color:#999;font-size:12px">${bomSpec}</span>`;
                 errCount++;
             } else {
-                // 情况2：找到了，开始比对规格 (简单字符串比对)
-                // 去除所有空格再比对，防止因为空格导致误报
-                const cleanBomSpec = bomSpec.replace(/\s/g, "");
-                const cleanSysSpec = sysItem.spec.replace(/\s/g, "");
-
-                if (cleanBomSpec === cleanSysSpec) {
-                    statusHtml = `<span class="status-badge status-ok">匹配</span>`;
-                    specHtml = `<span style="color:#27ae60">✔ ${bomSpec}</span>`;
-                    okCount++;
+                // 找到了对应物料，现在检查“另一项”是否匹配
+                
+                if (isModeSpec) {
+                    // 【模式：按规格】-> 检查品号是否一致
+                    infoHtml += `<br><span style="color:#27ae60;font-size:12px">✔ ${bomSpec}</span>`; // 显示规格作为参考
+                    
+                    if (sysItem.pn === bomPN) {
+                        statusHtml = `<span class="status-badge status-ok">匹配</span>`;
+                        diffHtml = `<span style="color:#27ae60">✔ ${bomPN}</span>`;
+                        okCount++;
+                    } else {
+                        statusHtml = `<span class="status-badge status-warn">不符</span>`;
+                        diffHtml = `
+                            <div class="diff-text">${bomPN || "(空)"} (BOM)</div>
+                            <div class="correct-text">${sysItem.pn} (系统)</div>
+                        `;
+                        warnCount++;
+                    }
                 } else {
-                    // 情况3：规格不一致
-                    statusHtml = `<span class="status-badge status-warn">不符</span>`;
-                    specHtml = `
-                        <div class="diff-text">${bomSpec} (BOM)</div>
-                        <div class="correct-text">${sysItem.spec} (系统)</div>
-                    `;
-                    warnCount++;
-                }
+                    // 【模式：按品号】-> 检查规格是否一致
+                    infoHtml = bomName; // 品名作为参考
+                    
+                    const cleanBomSpec = bomSpec.replace(/\s/g, "");
+                    const cleanSysSpec = sysItem.spec.replace(/\s/g, "");
 
-                // 比对品名 (辅助参考)
-                if (sysItem.name && bomName && sysItem.name !== bomName) {
-                    nameHtml = `<span class="diff-text">${bomName}</span><br><span class="correct-text">${sysItem.name}</span>`;
+                    if (cleanBomSpec === cleanSysSpec) {
+                        statusHtml = `<span class="status-badge status-ok">匹配</span>`;
+                        diffHtml = `<span style="color:#27ae60">✔ ${bomSpec}</span>`;
+                        okCount++;
+                    } else {
+                        statusHtml = `<span class="status-badge status-warn">不符</span>`;
+                        diffHtml = `
+                            <div class="diff-text">${bomSpec} (BOM)</div>
+                            <div class="correct-text">${sysItem.spec} (系统)</div>
+                        `;
+                        warnCount++;
+                    }
+                }
+            }
+
+            // 操作按钮：根据模式不同，复制的内容也不同
+            let actionBtn = '-';
+            if (sysItem) {
+                if (isModeSpec) {
+                    actionBtn = `<button onclick="copyTextStr('${sysItem.pn}')" style="padding:2px 8px; font-size:12px;width:auto;">复制系统品号</button>`;
+                } else {
+                    actionBtn = `<button onclick="copyTextStr('${sysItem.spec}')" style="padding:2px 8px; font-size:12px;width:auto;">复制系统规格</button>`;
                 }
             }
 
             html += `<tr>
+                <td class="copy-cell" onclick="copyText(this)">${bomDesig}</td>
                 <td class="copy-cell" onclick="copyText(this)">${bomPN}</td>
                 <td>${statusHtml}</td>
-                <td>${specHtml}</td>
-                <td>${nameHtml}</td>
-                <td>
-                    ${sysItem ? `<button onclick="copyTextStr('${sysItem.spec}')" style="padding:2px 8px; font-size:12px; width:auto;">复制系统规格</button>` : '-'}
-                </td>
+                <td>${diffHtml}</td>
+                <td>${infoHtml}</td>
+                <td>${actionBtn}</td>
             </tr>`;
         });
 
         html += `</tbody></table>`;
         
-        // 添加统计概览
         const summary = `
             <div style="margin-bottom:15px; padding:10px; background:#fff; border:1px solid #eee; display:flex; gap:20px;">
                 <span style="color:#155724">✅ 完全匹配: <strong>${okCount}</strong></span>
-                <span style="color:#856404">⚠️ 规格不符: <strong>${warnCount}</strong></span>
+                <span style="color:#856404">⚠️ 差异/建议: <strong>${warnCount}</strong></span>
                 <span style="color:#721c24">❌ 未找到: <strong>${errCount}</strong></span>
             </div>
         `;
@@ -379,13 +430,10 @@
     // ==========================================
     // 模块 3: UI 辅助与通用逻辑
     // ==========================================
-    
-    // 更新左侧系统状态
     function updateSysUI(active, text) {
         const ind = document.getElementById('dbIndicator');
         const stat = document.getElementById('sysStatus');
         const btn = document.getElementById('searchBtn');
-        
         ind.innerText = active ? "🟢 已连接" : "⚪ 未连接";
         ind.className = active ? "db-status active" : "db-status";
         stat.innerText = text;
