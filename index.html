@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>企业物料反查 & BOM比对系统 (V3.1 修正版)</title>
+    <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/localforage/1.10.0/localforage.min.js"></script>
+    
+    <style>
+        body { font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 1100px; margin: 0 auto; padding: 20px; background-color: #f5f7fa; color: #333; }
+        .container { background: white; padding: 0; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); overflow: hidden; min-height: 80vh;}
+        
+        /* 顶部导航 Tab */
+        .nav-tabs { display: flex; background: #f8f9fa; border-bottom: 1px solid #eee; }
+        .nav-item { 
+            flex: 1; text-align: center; padding: 20px; cursor: pointer; font-size: 16px; font-weight: bold; color: #7f8c8d; 
+            transition: 0.3s; border-right: 1px solid #eee;
+        }
+        .nav-item:hover { background: #ecf0f1; }
+        .nav-item.active { background: white; color: #3498db; border-top: 3px solid #3498db; }
+        
+        /* 页面内容区 */
+        .tab-content { display: none; padding: 30px; }
+        .tab-content.active { display: block; }
+
+        /* 通用组件 */
+        h1 { color: #2c3e50; padding-bottom: 10px; font-size: 22px; display: flex; justify-content: space-between; align-items: center; }
+        .section { margin-bottom: 25px; border-bottom: 1px dashed #eee; padding-bottom: 20px; }
+        .section:last-child { border-bottom: none; }
+        label { display: block; font-weight: bold; margin-bottom: 10px; color: #2c3e50; }
+        
+        .upload-box { border: 2px dashed #3498db; background-color: #f0f8ff; padding: 25px; text-align: center; border-radius: 8px; cursor: pointer; transition: 0.3s; }
+        .upload-box:hover { background-color: #e1f5fe; border-color: #2980b9; }
+        input[type="file"] { display: none; }
+
+        /* 数据库状态 */
+        .db-status { font-size: 13px; font-weight: normal; padding: 4px 10px; border-radius: 4px; background: #eee; color: #666; }
+        .db-status.active { background: #e8f5e9; color: #2e7d32; border: 1px solid #c8e6c9; }
+
+        /* 文件列表 */
+        .file-list { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px; }
+        .file-tag { background: #e3f2fd; color: #1976d2; padding: 5px 10px; border-radius: 15px; font-size: 12px; border: 1px solid #bbdefb; }
+        
+        /* 输入框与按钮 */
+        .input-group { display: flex; gap: 15px; margin-bottom: 15px; }
+        .input-field { flex: 1; }
+        
+        /* ★★★ 修正点：输入框样式还原 ★★★ */
+        input[type="text"] { 
+            width: 100%; 
+            padding: 10px; /* 改回 10px */
+            border: 1px solid #ddd; 
+            border-radius: 4px; 
+            box-sizing: border-box; /* 加回此属性，确保大小计算正确 */
+        }
+        
+        button { border: none; padding: 12px 25px; border-radius: 4px; cursor: pointer; font-size: 15px; transition: 0.3s; }
+        .btn-primary { background-color: #3498db; color: white; width: 100%; }
+        .btn-primary:hover { background-color: #2980b9; }
+        .btn-primary:disabled { background-color: #bdc3c7; cursor: not-allowed; }
+        .btn-secondary { background-color: #95a5a6; color: white; }
+        .btn-danger { background-color: #ff6b6b; color: white; padding: 8px 15px; font-size: 13px; }
+
+        /* 表格通用样式 */
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 14px; table-layout: fixed; }
+        th, td { border: 1px solid #eee; padding: 10px; text-align: left; word-break: break-all; }
+        th { background-color: #f8f9fa; color: #2c3e50; font-weight: 600; }
+        tr:nth-child(even) { background-color: #fcfcfc; }
+        
+        /* 复制交互 */
+        .copy-cell { cursor: pointer; position: relative; transition: 0.2s; }
+        .copy-cell:hover { background-color: #e3f2fd !important; color: #1976d2; font-weight: bold; }
+        .copy-cell:active { background-color: #bbdefb !important; }
+
+        /* BOM 比对结果专用样式 */
+        .status-badge { padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 12px; display: inline-block; text-align: center; width: 60px; }
+        .status-ok { background: #d4edda; color: #155724; }
+        .status-warn { background: #fff3cd; color: #856404; }
+        .status-err { background: #f8d7da; color: #721c24; }
+
+        .diff-text { color: #e74c3c; text-decoration: line-through; margin-right: 5px; font-size: 0.9em; }
+        .correct-text { color: #27ae60; font-weight: bold; }
+
+        /* 提示框 */
+        #toast { visibility: hidden; min-width: 200px; background-color: #333; color: #fff; text-align: center; border-radius: 4px; padding: 12px; position: fixed; z-index: 1000; left: 50%; bottom: 40px; transform: translateX(-50%); opacity: 0; transition: 0.3s; }
+        #toast.show { visibility: visible; opacity: 1; bottom: 60px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="nav-tabs">
+        <div class="nav-item active" onclick="switchTab('tab-search')">🔍 1. 系统物料反查</div>
+        <div class="nav-item" onclick="switchTab('tab-bom')">📋 2. BOM 比对验证</div>
+    </div>
+
+    <div id="tab-search" class="tab-content active">
+        <h1>系统库管理 <span id="dbIndicator" class="db-status">连接中...</span></h1>
+        
+        <div class="section">
+            <label>1. 上传 Excel/CSV 系统表 (支持多选/追加)</label> <div class="upload-box" onclick="document.getElementById('sysFileInput').click()">
+                <div style="font-size:24px">📂</div>
+                <span>点击上传系统代码表</span>
+                <input type="file" id="sysFileInput" multiple accept=".xls,.xlsx,.csv" onchange="handleSysFiles(this.files)">
+            </div>
+            <div id="fileListArea" class="file-list"></div>
+            <div style="margin-top:10px; display:flex; justify-content:space-between;">
+                <span id="sysStatus" style="color:#666; font-size:13px">等待操作...</span>
+                <button class="btn-danger" onclick="clearDatabase()">🗑️ 清空库</button>
+            </div>
+        </div>
+
+        <div class="section">
+            <label>2. 输入查询条件 (支持任意组合)</label>
+            <div class="input-group">
+                <div class="input-field"><input type="text" id="pnInput" placeholder="输入品号 (如 30101)"></div>
+                <div class="input-field"><input type="text" id="nameInput" placeholder="输入品名 (如 电阻)"></div>
+                <div class="input-field"><input type="text" id="specInput" placeholder="输入规格 (如 10k)"></div>
+            </div>
+            <div style="display:flex; gap:10px">
+                <button class="btn-primary" id="searchBtn" onclick="searchData()" disabled>查询</button>
+                <button class="btn-secondary" onclick="clearSearchInputs()" style="flex:0.3">清空</button>
+            </div>
+        </div>
+        
+        <div id="searchResultArea"></div>
+    </div>
+
+    <div id="tab-bom" class="tab-content">
+        <h1>BOM 比对验证</h1>
+        <div class="section">
+            <label>第一步：确保【系统物料反查】页已有数据</label>
+            <div class="upload-box" style="border-color: #27ae60; background: #f0fff4;" onclick="document.getElementById('bomFileInput').click()">
+                <div style="font-size:24px">📑</div>
+                <span>上传 BOM 表 (Excel/CSV)</span>
+                <div style="font-size:12px; color:#666; margin-top:5px">必须包含列头：品号、品名、规格型号</div>
+                <input type="file" id="bomFileInput" accept=".xls,.xlsx,.csv" onchange="handleBOMFile(this.files[0])">
+            </div>
+        </div>
+        
+        <div id="bomResultArea"></div>
+    </div>
+</div>
+
+<div id="toast">已复制</div>
+
+<script>
+    // --- 全局配置 ---
+    const DB_KEY = 'mat_db_v3';
+    const FILES_KEY = 'mat_files_v3';
+    let globalDB = []; // 系统库数据
+    let loadedFiles = []; // 已加载文件列表
+
+    // 初始化
+    document.addEventListener('DOMContentLoaded', async () => {
+        await loadCache();
+    });
+
+    // 切换 Tab
+    window.switchTab = function(tabId) {
+        document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+        document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+        document.getElementById(tabId).classList.add('active');
+        event.currentTarget.classList.add('active');
+    }
+
+    // ==========================================
+    // 模块 1: 系统库管理 (LocalForage + SheetJS)
+    // ==========================================
+    async function loadCache() {
+        try {
+            const db = await localforage.getItem(DB_KEY);
+            const files = await localforage.getItem(FILES_KEY);
+            if (db && db.length) {
+                globalDB = db;
+                loadedFiles = files || [];
+                updateSysUI(true, `已加载 ${globalDB.length} 条系统数据`);
+                renderFileList();
+            } else {
+                updateSysUI(false, "库为空");
+            }
+        } catch (e) { console.error(e); }
+    }
+
+    async function handleSysFiles(files) {
+        if (!files.length) return;
+        setSysStatus(`正在解析 ${files.length} 个文件...`, 'orange');
+        
+        const promises = Array.from(files).map(readSysFile);
+        try {
+            await Promise.all(promises);
+            // 去重与保存
+            const map = new Map();
+            globalDB.forEach(i => map.set(i.pn, i));
+            globalDB = Array.from(map.values());
+            
+            await localforage.setItem(DB_KEY, globalDB);
+            await localforage.setItem(FILES_KEY, loadedFiles);
+            
+            updateSysUI(true, `更新成功！当前库共 ${globalDB.length} 条`);
+            renderFileList();
+        } catch (e) {
+            setSysStatus("解析失败，请检查文件", 'red');
+        }
+    }
+
+    // 系统文件读取逻辑 (方块扫描)
+    function readSysFile(file) {
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const wb = XLSX.read(e.target.result, {type:'array'});
+                let count = 0;
+                wb.SheetNames.forEach(name => {
+                    const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], {header:1});
+                    const items = scanBlockData(file.name, rows);
+                    globalDB.push(...items);
+                    count += items.length;
+                });
+                // 更新文件列表
+                loadedFiles = loadedFiles.filter(f => f.name !== file.name);
+                loadedFiles.push({ name: file.name, count: count });
+                resolve();
+            };
+            reader.readAsArrayBuffer(file);
+        });
+    }
+
+    function scanBlockData(fileName, rows) {
+        let res = [], currPN = null, currName = "";
+        rows.forEach(row => {
+            row.forEach((cell, idx) => {
+                if(!cell) return;
+                let val = String(cell).replace(/\s/g,"");
+                // 找品号
+                if(val.includes("品号") && (val.includes(":")||val.includes("："))) {
+                    if(idx+1 < row.length) {
+                        let pn = String(row[idx+1]).trim();
+                        if(pn && !pn.includes("~")) { currPN = pn; currName = ""; }
+                    }
+                }
+                // 找品名
+                if(currPN && val.includes("品名") && (val.includes(":")||val.includes("："))) {
+                    if(idx+1 < row.length) currName = String(row[idx+1]).trim();
+                }
+                // 找规格
+                if(currPN && val.includes("规格") && (val.includes(":")||val.includes("："))) {
+                    if(idx+1 < row.length) {
+                        res.push({ file:fileName, pn:currPN, name:currName, spec:String(row[idx+1]).trim() });
+                    }
+                }
+            });
+        });
+        return res;
+    }
+
+    // ==========================================
+    // 模块 2: BOM 比对 (新逻辑)
+    // ==========================================
+    function handleBOMFile(file) {
+        if (!file) return;
+        if (globalDB.length === 0) {
+            alert("请先在【Tab 1】上传系统代码表，否则无法比对！");
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const wb = XLSX.read(e.target.result, {type:'array'});
+                const ws = wb.Sheets[wb.SheetNames[0]];
+                // 使用标准JSON模式读取 (自动识别第一行表头)
+                const bomData = XLSX.utils.sheet_to_json(ws); 
+                
+                renderBOMReport(bomData);
+            } catch (err) {
+                alert("BOM 解析失败，请确认文件格式正确");
+                console.error(err);
+            }
+        };
+        reader.readAsArrayBuffer(file);
+    }
+
+    function renderBOMReport(bomData) {
+        const div = document.getElementById('bomResultArea');
+        if (!bomData.length) {
+            div.innerHTML = "<p>BOM 文件为空或无法识别。</p>";
+            return;
+        }
+
+        let html = `<h3>比对结果 (${bomData.length} 行)</h3>`;
+        html += `<table>
+            <thead>
+                <tr>
+                    <th style="width:15%">BOM 品号</th>
+                    <th style="width:10%">状态</th>
+                    <th style="width:30%">规格比对 (上:BOM / 下:系统)</th>
+                    <th style="width:25%">品名比对</th>
+                    <th style="width:20%">操作</th>
+                </tr>
+            </thead>
+            <tbody>`;
+
+        let okCount=0, warnCount=0, errCount=0;
+
+        bomData.forEach(row => {
+            // 获取 BOM 里的关键字段 (容错处理)
+            const bomPN = String(row['品号'] || row['Part Number'] || "").trim();
+            const bomSpec = String(row['规格型号'] || row['规格'] || row['Specification'] || "").trim();
+            const bomName = String(row['品名'] || row['Description'] || "").trim();
+
+            if (!bomPN) return; // 跳过空行
+
+            // 在系统库中查找
+            const sysItem = globalDB.find(i => i.pn === bomPN);
+
+            let statusHtml = "";
+            let specHtml = bomSpec;
+            let nameHtml = bomName;
+            
+            if (!sysItem) {
+                // 情况1：未找到
+                statusHtml = `<span class="status-badge status-err">未找到</span>`;
+                specHtml = `<span style="color:#999">${bomSpec}</span>`;
+                errCount++;
+            } else {
+                // 情况2：找到了，开始比对规格 (简单字符串比对)
+                // 去除所有空格再比对，防止因为空格导致误报
+                const cleanBomSpec = bomSpec.replace(/\s/g, "");
+                const cleanSysSpec = sysItem.spec.replace(/\s/g, "");
+
+                if (cleanBomSpec === cleanSysSpec) {
+                    statusHtml = `<span class="status-badge status-ok">匹配</span>`;
+                    specHtml = `<span style="color:#27ae60">✔ ${bomSpec}</span>`;
+                    okCount++;
+                } else {
+                    // 情况3：规格不一致
+                    statusHtml = `<span class="status-badge status-warn">不符</span>`;
+                    specHtml = `
+                        <div class="diff-text">${bomSpec} (BOM)</div>
+                        <div class="correct-text">${sysItem.spec} (系统)</div>
+                    `;
+                    warnCount++;
+                }
+
+                // 比对品名 (辅助参考)
+                if (sysItem.name && bomName && sysItem.name !== bomName) {
+                    nameHtml = `<span class="diff-text">${bomName}</span><br><span class="correct-text">${sysItem.name}</span>`;
+                }
+            }
+
+            html += `<tr>
+                <td class="copy-cell" onclick="copyText(this)">${bomPN}</td>
+                <td>${statusHtml}</td>
+                <td>${specHtml}</td>
+                <td>${nameHtml}</td>
+                <td>
+                    ${sysItem ? `<button onclick="copyTextStr('${sysItem.spec}')" style="padding:2px 8px; font-size:12px; width:auto;">复制系统规格</button>` : '-'}
+                </td>
+            </tr>`;
+        });
+
+        html += `</tbody></table>`;
+        
+        // 添加统计概览
+        const summary = `
+            <div style="margin-bottom:15px; padding:10px; background:#fff; border:1px solid #eee; display:flex; gap:20px;">
+                <span style="color:#155724">✅ 完全匹配: <strong>${okCount}</strong></span>
+                <span style="color:#856404">⚠️ 规格不符: <strong>${warnCount}</strong></span>
+                <span style="color:#721c24">❌ 未找到: <strong>${errCount}</strong></span>
+            </div>
+        `;
+
+        div.innerHTML = summary + html;
+    }
+
+
+    // ==========================================
+    // 模块 3: UI 辅助与通用逻辑
+    // ==========================================
+    
+    // 更新左侧系统状态
+    function updateSysUI(active, text) {
+        const ind = document.getElementById('dbIndicator');
+        const stat = document.getElementById('sysStatus');
+        const btn = document.getElementById('searchBtn');
+        
+        ind.innerText = active ? "🟢 已连接" : "⚪ 未连接";
+        ind.className = active ? "db-status active" : "db-status";
+        stat.innerText = text;
+        stat.style.color = active ? "green" : "#666";
+        btn.disabled = !active;
+    }
+
+    function setSysStatus(msg, color) {
+        const el = document.getElementById('sysStatus');
+        el.innerText = msg;
+        el.style.color = color;
+    }
+
+    function renderFileList() {
+        const div = document.getElementById('fileListArea');
+        div.innerHTML = "";
+        loadedFiles.forEach(f => {
+            const tag = document.createElement('div');
+            tag.className = 'file-tag';
+            tag.innerText = `${f.name} (${f.count})`;
+            div.appendChild(tag);
+        });
+    }
+
+    async function clearDatabase() {
+        if(confirm("确定清空系统库？")) {
+            await localforage.clear();
+            globalDB=[]; loadedFiles=[];
+            updateSysUI(false, "已清空");
+            renderFileList();
+            document.getElementById('searchResultArea').innerHTML="";
+        }
+    }
+
+    // --- 查询逻辑 ---
+    function searchData() {
+        const qPN = document.getElementById('pnInput').value.toLowerCase().trim();
+        const qName = document.getElementById('nameInput').value.toLowerCase().trim();
+        const qSpec = document.getElementById('specInput').value.toLowerCase().trim();
+        
+        if(!qPN && !qName && !qSpec) { alert("请输入条件"); return; }
+        
+        const res = globalDB.filter(i => {
+            const mPN = qPN ? String(i.pn).toLowerCase().includes(qPN) : true;
+            const mName = qName ? String(i.name).toLowerCase().includes(qName) : true;
+            const mSpec = qSpec ? String(i.spec).toLowerCase().includes(qSpec) : true;
+            return mPN && mName && mSpec;
+        });
+        
+        renderTable(res, 'searchResultArea');
+    }
+
+    function renderTable(data, containerId) {
+        const div = document.getElementById(containerId);
+        if(!data.length) { div.innerHTML="<p style='color:red;text-align:center'>未找到记录</p>"; return; }
+        
+        let h = `<table><thead><tr><th>品号</th><th>品名</th><th>规格</th><th>来源</th></tr></thead><tbody>`;
+        data.forEach(i => {
+            h += `<tr>
+                <td class="copy-cell" onclick="copyText(this)">${i.pn}</td>
+                <td class="copy-cell" onclick="copyText(this)">${i.name}</td>
+                <td class="copy-cell" onclick="copyText(this)">${i.spec}</td>
+                <td>${i.file}</td>
+            </tr>`;
+        });
+        h+="</tbody></table>";
+        div.innerHTML = `<h3>找到 ${data.length} 条记录</h3>` + h;
+    }
+
+    function clearSearchInputs() {
+        ['pnInput','nameInput','specInput'].forEach(id=>document.getElementById(id).value='');
+        document.getElementById('searchResultArea').innerHTML="";
+    }
+
+    // --- 复制功能 ---
+    window.copyText = function(el) { execCopy(el.innerText); }
+    window.copyTextStr = function(str) { execCopy(str); }
+
+    function execCopy(text) {
+        if(!text) return;
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position="fixed"; ta.style.left="-9999px";
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); showToast("已复制: "+text); } 
+        catch(e) { alert("复制失败"); }
+        document.body.removeChild(ta);
+    }
+
+    function showToast(msg) {
+        const t = document.getElementById("toast");
+        t.innerText = msg; t.classList.add("show");
+        setTimeout(()=>t.classList.remove("show"), 2000);
+    }
+</script>
+
+</body>
+</html>
